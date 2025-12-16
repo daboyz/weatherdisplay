@@ -1,0 +1,22 @@
+# Arduino/PlatformIO
+.pio/
+.vscode/
+.DS_Store
+*.bin
+*.elf
+*.map
+
+# Credentials (IMPORTANT)
+credentials.h
+secrets.h
+
+# IDE
+*.swp
+*.swo
+*~
+.idea/
+
+# Build artifacts
+build/
+*.o
+*.a
