@@ -5,7 +5,7 @@ Low-power ESP32 weather station with e-ink display. Updates every 30 minutes, sh
 ## Hardware
 
 - ESP32 development board
-- Waveshare 2.13" 3-color e-ink display (212x104, red/black/white)
+- Waveshare 2.13" 3-color e-ink display (250x122, red/black/white)
 - Connections: CS=15, DC=27, RST=26, BUSY=25, MOSI=14, CLK=13
 
 ## Features
@@ -34,6 +34,10 @@ Low-power ESP32 weather station with e-ink display. Updates every 30 minutes, sh
 ## Battery Life
 
 With 2500mAh battery: ~2-3 months (depending on WiFi connection time)
+
+## Icons
+
+https://github.com/manifestinteractive/weather-underground-icons
 
 ## License
 
