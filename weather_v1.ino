@@ -15,9 +15,9 @@ const char* ssid = "XXXXXXXX";
 const char* password = "XXXXXXXX";
 
 // OpenWeatherMap API
-const char* apiKey = "XXXXXXXXXXXXX";
-const char* city = "XXXX";
-const char* countryCode = "XX";
+const char* apiKey = "XXXXXXXXXXXXXXXXXXXXXXX";
+const char* city = "Lviv";
+const char* countryCode = "UA";
 
 // Display instance for Waveshare 2.13" 3-color (250x122 pixels)
 GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(GxEPD2_213_Z98c(/*CS=*/ 15, /*DC=*/ 27, /*RST=*/ 26, /*BUSY=*/ 25));
@@ -693,14 +693,34 @@ void displayWeather() {
   do {
     display.fillScreen(GxEPD_WHITE);
     
-    // === LAYOUT DIMENSIONS ===
-    int leftSectionWidth = 83;      // 1/3 of 250px (left section starts at x=0)
-    int rightSectionStart = 83;     // Right section starts at x=83
-    int rightSectionWidth = 167;    // 2/3 of 250px
-    int dinoSectionY = 88;
+    // === CONFIGURABLE LAYOUT VARIABLES ===
+    // Section dimensions
+    int leftSectionWidth = 95;           // Left section width (was 83)
+    int rightSectionStart = 95;          // Where right section begins
+    int rightSectionWidth = 155;         // Right section width (250 - 95)
     
-    // Draw vertical divider line at the start of right section
-    display.drawLine(rightSectionStart, 0, rightSectionStart, dinoSectionY, GxEPD_BLACK);
+    // Left section spacing
+    int tempFeelsSpacing = 26;           // Vertical spacing between temp and feels like (was ~22)
+    
+    // Right section row positions (baseline y for text)
+    int iconBottomY = 62;                // Where weather icon ends
+    int row2Offset = 20;                 // Offset from icon bottom to row 2 baseline
+    int row3Offset = 20;                 // Offset from row 2 baseline to row 3 baseline
+    int row2Y = iconBottomY + row2Offset;     // Wind/Precip row baseline
+    int row3Y = row2Y + row3Offset;           // High/Low row baseline
+    
+    // Horizontal spacing in right section
+    int windPrecipSpacing = 12;          // Space between wind display and precipitation
+    int highLowSpacing = 12;             // Space between high and low temps
+    int labelValueSpacing = 3;           // Space between H/L labels and their values
+    
+    // Dinosaur positions in left section
+    int dinoLeftX = 8;                   // Leftmost position
+    int dinoCenterX = (leftSectionWidth - 48) / 2;  // Centered (48 = dino width)
+    int dinoRightX = leftSectionWidth - 48 - 8;     // Rightmost position
+    
+    // Draw vertical divider line (full height)
+    display.drawLine(rightSectionStart, 0, rightSectionStart, 122, GxEPD_BLACK);
     
     // === LEFT SECTION: Temperature & Feels Like ===
     int tempValue = (int)round(weather.temp);
@@ -717,10 +737,11 @@ void displayWeather() {
     uint16_t w, h;
     display.getTextBounds(tempStr, 0, 0, &x1, &y1, &w, &h);
     int tempX = (leftSectionWidth - w) / 2 - x1;
-    display.setCursor(tempX, 48);
+    int tempY = 48;
+    display.setCursor(tempX, tempY);
     display.print(tempStr);
     
-    // Feels like
+    // Feels like (with increased spacing)
     display.setTextColor(GxEPD_BLACK);
     display.setFont(&FreeSansBold12pt7b);
     int feelsValue = (int)round(weather.feels_like);
@@ -728,160 +749,109 @@ void displayWeather() {
     
     display.getTextBounds(feelsStr, 0, 0, &x1, &y1, &w, &h);
     int feelsX = (leftSectionWidth - w) / 2 - x1;
-    display.setCursor(feelsX, 70);
+    int feelsY = tempY + tempFeelsSpacing;
+    display.setCursor(feelsX, feelsY);
     display.print(feelsStr);
     
     // === RIGHT SECTION: Weather Icon (top) ===
-    // Icon should be 60x60 to fit above info bar (ends at y=60, info starts ~y=62)
     int iconSize = 60;
     int iconX = rightSectionStart + (rightSectionWidth - iconSize) / 2;
     int iconY = 2;
-    //drawWeatherIcon(weather.weatherId, iconX, iconY);
     drawWeatherIcon(weather.iconCode, iconX, iconY);
     
-    // === RIGHT SECTION: Info Bar (bottom) ===
+    // === RIGHT SECTION: Row 2 - Wind & Precipitation ===
     display.setFont(&FreeSansBold9pt7b);
-    int infoY = 76;
-    int windSpeed = (int)round(weather.wind_speed * 3.6);
-    
+    int windSpeed = (int)round(weather.wind_speed * 3.6);  // Convert m/s to km/h
+    String windStr = String(windSpeed);
     String precipStr = String(weather.precipProb) + "%";
+    
+    display.getTextBounds(windStr, 0, 0, &x1, &y1, &w, &h);
+    int windValueW = w;
+    display.getTextBounds(precipStr, 0, 0, &x1, &y1, &w, &h);
+    int precipW = w;
+    
+    int windIconW = 24;
+    int windIconSpace = 4;
+    
+    // Total width: icon + space + value + space + precip
+    int row2TotalWidth = windIconW + windIconSpace + windValueW + windPrecipSpacing + precipW;
+    
+    display.getTextBounds(windStr, 0, 0, &x1, &y1, &w, &h);
+    int startX = rightSectionStart + (rightSectionWidth - row2TotalWidth) / 2 - x1;
+    
+    // Wind icon
+    display.drawBitmap(startX, row2Y - 16, icon_wind, 24, 24, GxEPD_WHITE, GxEPD_BLACK);
+    
+    // Wind speed value (red if >20 km/h, black otherwise)
+    if (windSpeed > 20) {
+      display.setTextColor(GxEPD_RED);
+    } else {
+      display.setTextColor(GxEPD_BLACK);
+    }
+    display.setCursor(startX + windIconW + windIconSpace, row2Y);
+    display.print(windStr);
+    
+    // Precipitation
+    display.setTextColor(GxEPD_BLACK);
+    int precipX = startX + windIconW + windIconSpace + windValueW + windPrecipSpacing;
+    display.setCursor(precipX, row2Y);
+    display.print(precipStr);
+    
+    // === RIGHT SECTION: Row 3 - High & Low ===
     int highTemp = (int)weather.highTemp;
     int lowTemp = (int)weather.lowTemp;
+    String highStr = String(highTemp);
+    String lowStr = String(lowTemp);
     
-    if (windSpeed >= 20) {
-      // Show wind icon + speed, precipitation, high/low
-      String windStr = String(windSpeed);
-      
-      display.getTextBounds(windStr, 0, 0, &x1, &y1, &w, &h);
-      int windTextW = w;
-      display.getTextBounds(precipStr, 0, 0, &x1, &y1, &w, &h);
-      int precipW = w;
-      
-      // Calculate individual high and low widths for color coding
-      String highStr = String(highTemp);
-      String lowStr = String(lowTemp);
-      display.getTextBounds(highStr, 0, 0, &x1, &y1, &w, &h);
-      int highW = w;
-      display.getTextBounds(lowStr, 0, 0, &x1, &y1, &w, &h);
-      int lowW = w;
-      display.getTextBounds("H", 0, 0, &x1, &y1, &w, &h);
-      int hLabelW = w;
-      display.getTextBounds("L", 0, 0, &x1, &y1, &w, &h);
-      int lLabelW = w;
-
-      int labelValueSpace = 3;    // Space between H/L and their values
-      int valueLabelSpace = 10;    // Space between high value and "L" label
-      int windIconSpace = 1;      // Space after wind icon
-      
-      //int totalWidth = 32 + 5 + windTextW + 15 + precipW + 15 + hLabelW + highW + lLabelW + lowW;
-      int totalWidth = 24 + windIconSpace + windTextW + 12 + precipW + 12 + hLabelW + labelValueSpace + highW + valueLabelSpace + lLabelW + labelValueSpace + lowW;
-      //int startX = rightSectionStart + (rightSectionWidth - totalWidth) / 2;
-      display.getTextBounds(windStr, 0, 0, &x1, &y1, &w, &h);
-      int startX = rightSectionStart + (rightSectionWidth - totalWidth) / 2 - x1;
-      
-      // Wind icon
-      display.drawBitmap(startX, 60, icon_wind, 24, 24, GxEPD_WHITE, GxEPD_BLACK);
-      
-      // Wind speed
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(startX + 24 + windIconSpace, infoY);
-      display.print(windStr);
-      
-      // Precipitation
-      int precipX = startX + 24 + 5 + windTextW + 12;
-      display.setCursor(precipX, infoY);
-      display.print(precipStr);
-      
-      // High temp with color
-      int highX = precipX + precipW + 12;
-      display.setCursor(highX, infoY);
-      display.print("H");
-      
-      if (highTemp > 0) {
-        display.setTextColor(GxEPD_RED);
-      }
-      //display.setCursor(highX + hLabelW, infoY);
-      display.setCursor(highX + hLabelW + labelValueSpace, infoY);
-      display.print(highStr);
-      
-      // Low temp with color
-      display.setTextColor(GxEPD_BLACK);
-      //display.setCursor(highX + hLabelW + highW, infoY);
-      int lowLabelX = highX + hLabelW + labelValueSpace + highW + valueLabelSpace;
-      display.setCursor(lowLabelX, infoY);
-      display.print("L");
-      
-      if (lowTemp > 0) {
-        display.setTextColor(GxEPD_RED);
-      }
-      //display.setCursor(highX + hLabelW + highW + lLabelW, infoY);
-      display.setCursor(lowLabelX + lLabelW + labelValueSpace, infoY);
-      display.print(lowStr);
-      
-    } else {
-      // Show precipitation, high/low only
-      display.getTextBounds(precipStr, 0, 0, &x1, &y1, &w, &h);
-      int precipW = w;
-      
-      String highStr = String(highTemp);
-      String lowStr = String(lowTemp);
-      display.getTextBounds(highStr, 0, 0, &x1, &y1, &w, &h);
-      int highW = w;
-      display.getTextBounds(lowStr, 0, 0, &x1, &y1, &w, &h);
-      int lowW = w;
-      display.getTextBounds("H", 0, 0, &x1, &y1, &w, &h);
-      int hLabelW = w;
-      display.getTextBounds("L", 0, 0, &x1, &y1, &w, &h);
-      int lLabelW = w;
-
-      int labelValueSpace = 3;
-      int valueLabelSpace = 12;
-      
-      //int totalWidth = precipW + 15 + hLabelW + highW + lLabelW + lowW;
-      int totalWidth = precipW + 15 + hLabelW + labelValueSpace + highW + valueLabelSpace + lLabelW + labelValueSpace + lowW;
-      //int startX = rightSectionStart + (rightSectionWidth - totalWidth) / 2;
-      display.getTextBounds(precipStr, 0, 0, &x1, &y1, &w, &h);
-      int startX = rightSectionStart + (rightSectionWidth - totalWidth) / 2 - x1;
-      
-      display.setTextColor(GxEPD_BLACK);
-      display.setCursor(startX, infoY);
-      display.print(precipStr);
-      
-      int highX = startX + precipW + 15;
-      display.setCursor(highX, infoY);
-      display.print("H");
-      
-      if (highTemp > 0) {
-        display.setTextColor(GxEPD_RED);
-      }
-      //display.setCursor(highX + hLabelW, infoY);
-      display.setCursor(highX + hLabelW + labelValueSpace, infoY);
-      display.print(highStr);
-      
-      display.setTextColor(GxEPD_BLACK);
-      //display.setCursor(highX + hLabelW + highW, infoY);
-      int lowLabelX = highX + hLabelW + labelValueSpace + highW + valueLabelSpace;
-      display.setCursor(lowLabelX, infoY);
-      display.print("L");
-      
-      if (lowTemp > 0) {
-        display.setTextColor(GxEPD_RED);
-      }
-      //display.setCursor(highX + hLabelW + highW + lLabelW, infoY);
-      display.setCursor(lowLabelX + lLabelW + labelValueSpace, infoY);
-      display.print(lowStr);
+    display.getTextBounds(highStr, 0, 0, &x1, &y1, &w, &h);
+    int highW = w;
+    display.getTextBounds(lowStr, 0, 0, &x1, &y1, &w, &h);
+    int lowW = w;
+    display.getTextBounds("H", 0, 0, &x1, &y1, &w, &h);
+    int hLabelW = w;
+    display.getTextBounds("L", 0, 0, &x1, &y1, &w, &h);
+    int lLabelW = w;
+    
+    // Total width: H + space + highValue + space + L + space + lowValue
+    int row3TotalWidth = hLabelW + labelValueSpacing + highW + highLowSpacing + 
+                         lLabelW + labelValueSpacing + lowW;
+    
+    display.getTextBounds(highStr, 0, 0, &x1, &y1, &w, &h);
+    startX = rightSectionStart + (rightSectionWidth - row3TotalWidth) / 2 - x1;
+    
+    // High temp
+    display.setTextColor(GxEPD_BLACK);
+    display.setCursor(startX, row3Y);
+    display.print("H");
+    
+    if (highTemp > 0) {
+      display.setTextColor(GxEPD_RED);
     }
+    display.setCursor(startX + hLabelW + labelValueSpacing, row3Y);
+    display.print(highStr);
     
-    // === BOTTOM SECTION: Dinosaur ===
-    int dinoY = dinoSectionY;
+    // Low temp
+    display.setTextColor(GxEPD_BLACK);
+    int lowLabelX = startX + hLabelW + labelValueSpacing + highW + highLowSpacing;
+    display.setCursor(lowLabelX, row3Y);
+    display.print("L");
+    
+    if (lowTemp > 0) {
+      display.setTextColor(GxEPD_RED);
+    }
+    display.setCursor(lowLabelX + lLabelW + labelValueSpacing, row3Y);
+    display.print(lowStr);
+    
+    // === LEFT SECTION: Dinosaur (bottom) ===
+    int dinoY = 88;
     int dinoX;
     const unsigned char* dinoIcon = nullptr;
     
     switch(dinoPosition) {
-      case 0: dinoX = 16; dinoIcon = icon_dino_left; break;
-      case 1: dinoX = 101; dinoIcon = icon_dino_center; break;
-      case 2: dinoX = 186; dinoIcon = icon_dino_right; break;
-      default: dinoX = 101; dinoIcon = icon_dino_center;
+      case 0: dinoX = dinoLeftX; dinoIcon = icon_dino_left; break;
+      case 1: dinoX = dinoCenterX; dinoIcon = icon_dino_center; break;
+      case 2: dinoX = dinoRightX; dinoIcon = icon_dino_right; break;
+      default: dinoX = dinoCenterX; dinoIcon = icon_dino_center;
     }
     
     display.drawBitmap(dinoX, dinoY, dinoIcon, 48, 32, GxEPD_WHITE, GxEPD_BLACK);
