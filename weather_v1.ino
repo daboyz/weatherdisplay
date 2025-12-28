@@ -16,8 +16,8 @@ const char* password = "XXXXXXXX";
 
 // OpenWeatherMap API
 const char* apiKey = "XXXXXXXXXXXXXXXXXXXXXXX";
-const char* city = "Lviv";
-const char* countryCode = "UA";
+const char* city = "XXXX";
+const char* countryCode = "XX";
 
 // Display instance for Waveshare 2.13" 3-color (250x122 pixels)
 GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(GxEPD2_213_Z98c(/*CS=*/ 15, /*DC=*/ 27, /*RST=*/ 26, /*BUSY=*/ 25));
@@ -32,7 +32,6 @@ GxEPD2_3C<GxEPD2_213_Z98c, GxEPD2_213_Z98c::HEIGHT> display(GxEPD2_213_Z98c(/*CS
 // RTC memory to store previous weather state (survives deep sleep)
 RTC_DATA_ATTR int prevTemp = -999;
 RTC_DATA_ATTR int prevFeelsLike = -999;
-//RTC_DATA_ATTR int prevWeatherId = -999;
 RTC_DATA_ATTR char prevIconCode[4] = "";
 RTC_DATA_ATTR int prevPrecipProb = -999;
 RTC_DATA_ATTR int prevWindSpeed = -999;
@@ -473,7 +472,6 @@ struct WeatherData {
   float feels_like;
   String description;
   String main;
-  //int weatherId;
   char iconCode[4];
   float wind_speed;
   int precipProb;
@@ -506,7 +504,6 @@ void setup() {
     
     bool weatherChanged = (currentTemp != prevTemp) || 
                          (currentFeelsLike != prevFeelsLike) ||
-                         //(weather.weatherId != prevWeatherId) ||
                          (strcmp(weather.iconCode, prevIconCode) != 0) ||
                          (weather.precipProb != prevPrecipProb) ||
                          ((currentWindSpeed >= 20) != (prevWindSpeed >= 20)) ||
@@ -519,7 +516,6 @@ void setup() {
       
       prevTemp = currentTemp;
       prevFeelsLike = currentFeelsLike;
-      //prevWeatherId = weather.weatherId;
       strlcpy(prevIconCode, weather.iconCode, sizeof(prevIconCode));
       prevPrecipProb = weather.precipProb;
       prevWindSpeed = currentWindSpeed;
@@ -603,7 +599,6 @@ bool getWeatherData() {
   weather.feels_like = doc["main"]["feels_like"];
   weather.description = doc["weather"][0]["description"].as<String>();
   weather.main = doc["weather"][0]["main"].as<String>();
-  //weather.weatherId = doc["weather"][0]["id"];
   const char* iconCode = doc["weather"][0]["icon"];
   strlcpy(weather.iconCode, iconCode, sizeof(weather.iconCode));
   weather.wind_speed = doc["wind"]["speed"];
@@ -710,8 +705,10 @@ void displayWeather() {
     int row3Y = row2Y + row3Offset;           // High/Low row baseline
     
     // Horizontal spacing in right section
-    int windPrecipSpacing = 12;          // Space between wind display and precipitation
-    int highLowSpacing = 12;             // Space between high and low temps
+    int windIconSpace = 1;               // Space between wind icon and value
+    int windPrecipSpacing = 16;          // Space between wind display and precipitation
+    int precipValuePercentSpacing = 3;   // Space between precipitation value and '%' sign
+    int highLowSpacing = 16;             // Space between high and low temps
     int labelValueSpacing = 3;           // Space between H/L labels and their values
     
     // Dinosaur positions in left section
@@ -763,18 +760,21 @@ void displayWeather() {
     display.setFont(&FreeSansBold9pt7b);
     int windSpeed = (int)round(weather.wind_speed * 3.6);  // Convert m/s to km/h
     String windStr = String(windSpeed);
-    String precipStr = String(weather.precipProb) + "%";
+    String precipValue = String(weather.precipProb);
+    String precipPercent = "%";
     
     display.getTextBounds(windStr, 0, 0, &x1, &y1, &w, &h);
     int windValueW = w;
-    display.getTextBounds(precipStr, 0, 0, &x1, &y1, &w, &h);
-    int precipW = w;
+    display.getTextBounds(precipValue, 0, 0, &x1, &y1, &w, &h);
+    int precipValueW = w;
+    display.getTextBounds(precipPercent, 0, 0, &x1, &y1, &w, &h);
+    int precipPercentW = w;
     
     int windIconW = 24;
-    int windIconSpace = 4;
     
-    // Total width: icon + space + value + space + precip
-    int row2TotalWidth = windIconW + windIconSpace + windValueW + windPrecipSpacing + precipW;
+    // Total width: icon + space + windValue + space + precipValue + space + %
+    int row2TotalWidth = windIconW + windIconSpace + windValueW + windPrecipSpacing + 
+                         precipValueW + precipValuePercentSpacing + precipPercentW;
     
     display.getTextBounds(windStr, 0, 0, &x1, &y1, &w, &h);
     int startX = rightSectionStart + (rightSectionWidth - row2TotalWidth) / 2 - x1;
@@ -791,11 +791,15 @@ void displayWeather() {
     display.setCursor(startX + windIconW + windIconSpace, row2Y);
     display.print(windStr);
     
-    // Precipitation
+    // Precipitation value
     display.setTextColor(GxEPD_BLACK);
     int precipX = startX + windIconW + windIconSpace + windValueW + windPrecipSpacing;
     display.setCursor(precipX, row2Y);
-    display.print(precipStr);
+    display.print(precipValue);
+    
+    // Precipitation percent sign
+    display.setCursor(precipX + precipValueW + precipValuePercentSpacing, row2Y);
+    display.print(precipPercent);
     
     // === RIGHT SECTION: Row 3 - High & Low ===
     int highTemp = (int)weather.highTemp;
@@ -911,31 +915,6 @@ void drawWeatherIcon(const char* iconCode, int x, int y) {
   }
   
   if (iconBitmap != nullptr) {
-    display.drawBitmap(x, y, iconBitmap, 60, 60, GxEPD_WHITE, GxEPD_BLACK);
-  }
-}
-
-void drawWeatherIconOld(int weatherId, int x, int y) {
-  const unsigned char* iconBitmap = nullptr;
-  
-  if (weatherId >= 200 && weatherId < 300) {
-    iconBitmap = icon_thunderstorm;
-  } else if (weatherId >= 300 && weatherId < 600) {
-    iconBitmap = icon_rain;
-  } else if (weatherId >= 600 && weatherId < 700) {
-    iconBitmap = icon_snow;
-  } else if (weatherId >= 700 && weatherId < 800) {
-    iconBitmap = icon_fog;
-  } else if (weatherId == 800) {
-    iconBitmap = icon_clear;
-  } else if (weatherId == 801) {
-    iconBitmap = icon_partly_cloudy;
-  } else if (weatherId >= 802) {
-    iconBitmap = icon_cloudy;
-  }
-  
-  if (iconBitmap != nullptr) {
-    // NOTE: Update your icon bitmaps to 60x60 size
     display.drawBitmap(x, y, iconBitmap, 60, 60, GxEPD_WHITE, GxEPD_BLACK);
   }
 }
