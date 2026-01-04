@@ -5,17 +5,16 @@
 #include <Fonts/FreeSansBold24pt7b.h>
 #include <Fonts/FreeSansBold12pt7b.h>
 #include <Fonts/FreeSansBold9pt7b.h>
-
-// Note: Adafruit GFX fonts are available in specific sizes only
-// Standard sizes: 9pt, 12pt, 18pt, 24pt
-// We'll use a workaround to make text appear larger
+#include <esp_bt.h>
+#include <esp_wifi.h>
+#include <esp_sleep.h>
 
 // WiFi credentials
 const char* ssid = "XXXXXXXX";
 const char* password = "XXXXXXXX";
 
 // OpenWeatherMap API
-const char* apiKey = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
+const char* apiKey = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
 const char* city = "XXXX";
 const char* countryCode = "XX";
 
@@ -480,15 +479,52 @@ struct WeatherData {
   float lowTemp;
 } weather;
 
+// Power management
+void disableBluetoothRadios() {
+  btStop();
+  esp_bt_controller_disable();
+  esp_bt_controller_deinit();
+  Serial.println("Bluetooth disabled");
+}
+
+void configurePowerManagement() {
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_ON);
+  
+  setCpuFrequencyMhz(80);
+  Serial.println("CPU frequency: 80 MHz");
+}
+
+void cleanupAndSleep() {
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  esp_wifi_stop();
+  esp_wifi_deinit();
+  SPI.end();
+  delay(100);
+  Serial.println("Peripherals cleaned up");
+}
+
+void enterDeepSleep(uint16_t minutes) {
+  Serial.printf("Entering deep sleep for %d minutes\n", minutes);
+  Serial.flush();
+  esp_sleep_enable_timer_wakeup(minutes * 60ULL * 1000000ULL);
+  esp_deep_sleep_start();
+}
+
 void setup() {
+  unsigned long setupStart = millis();
+
   Serial.begin(115200);
   delay(1000);
   
   Serial.println("Weather Display Starting...");
   Serial.println("Failure count: " + String(failureCount));
   
-  btStop();
-  Serial.println("Bluetooth disabled");
+  disableBluetoothRadios();
+  configurePowerManagement();
+  Serial.println("Power consumption optimized");
   
   SPI.begin(EPD_CLK, -1, EPD_MOSI, 15);
   
@@ -501,7 +537,6 @@ void setup() {
   bool wifiConnected = connectWiFiWithRetries();
   
   if (wifiConnected && getWeatherData()) {
-  //if (getWeatherData()) {
     int currentTemp = (int)round(weather.temp);
     int currentFeelsLike = (int)round(weather.feels_like);
     int currentWindSpeed = (int)round(weather.wind_speed * 3.6);
@@ -533,19 +568,16 @@ void setup() {
 
     // Success - reset failure counter and sleep normal duration
     failureCount = 0;
-    Serial.println("Success! Sleeping for 30 minutes...");
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-    esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000ULL);
-    esp_deep_sleep_start();
+    unsigned long totalTime = millis() - setupStart;
+    Serial.printf("Total wake time: %lu ms\n", totalTime);
+    Serial.println("Weather update success!");
+    cleanupAndSleep();
+    enterDeepSleep(SLEEP_DURATION / 60);
 
   } else {
     // Failure - increment counter and implement smart retry
     failureCount++;
     displayError();
-
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
     
     // Smart sleep duration based on failure count
     uint64_t sleepMinutes;
@@ -555,22 +587,17 @@ void setup() {
     } else if (failureCount == 2) {
       sleepMinutes = 10;  // Second failure: retry in 10 minutes
       Serial.println("Second failure - retrying in 10 minutes...");
+    } else if (failureCount == 3) {
+      sleepMinutes = 20;  // Third failure: retry in 20 minutes
+      Serial.println("Second failure - retrying in 20 minutes...");
     } else {
-      sleepMinutes = 30;  // Third+ failure: retry in 30 minutes
+      sleepMinutes = 30;  // Fourth+ failure: retry in 30 minutes
       Serial.println("Multiple failures - retrying in 30 minutes...");
     }
     
-    Serial.println("Going to sleep for 30 minutes...");
-    esp_sleep_enable_timer_wakeup(sleepMinutes * 60 * 1000000ULL);
-    esp_deep_sleep_start();
+    cleanupAndSleep();
+    enterDeepSleep(sleepMinutes);
   }
-  
-  //WiFi.disconnect(true);
-  //WiFi.mode(WIFI_OFF);
-  
-  //Serial.println("Going to sleep for 30 minutes...");
-  //esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000ULL);
-  //esp_deep_sleep_start();
 }
 
 void loop() {
@@ -598,26 +625,6 @@ bool connectWiFiWithRetries() {
   
   Serial.println("All connection attempts failed");
   return false;
-}
-
-void connectWiFiOld() {    //TODO remove
-  Serial.print("Connecting to WiFi");
-  WiFi.setSleep(true);
-  WiFi.begin(ssid, password);
-  
-  int attempts = 0;
-  while (WiFi.status() != WL_CONNECTED && attempts < 10) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
-  }
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nConnected!");
-    Serial.println(WiFi.localIP());
-  } else {
-    Serial.println("\nFailed to connect!");
-  }
 }
 
 bool connectWiFi(int maxAttempts) {
@@ -654,32 +661,37 @@ bool getWeatherData() {
     return false;
   }
   
-  HTTPClient http;
+  HTTPClient http1;
+  char url[200];
+  snprintf(url, sizeof(url), 
+           "http://api.openweathermap.org/data/2.5/weather?q=%s,%s&appid=%s&units=metric",
+           city, countryCode, apiKey);
   
-  String url = "http://api.openweathermap.org/data/2.5/weather?q=" + 
-               String(city) + "," + String(countryCode) + 
-               "&appid=" + String(apiKey) + "&units=metric";
-  
+  unsigned long apiStart = millis();
   Serial.println("Fetching current weather...");
-  http.begin(url);
-  http.setTimeout(15000);  // 15 second timeout
-  int httpCode = http.GET();
+  http1.begin(url);
+  http1.setTimeout(15000);  // 15 second timeout
+  int httpCode = http1.GET();
   
   if (httpCode != 200) {
-    Serial.print("HTTP Error: ");
-    Serial.println(httpCode);
-    http.end();
+    Serial.printf("HTTP Error: %d\n", httpCode);
+    http1.end();
     return false;
   }
   
-  String payload = http.getString();
+  String payload = http1.getString();
+  http1.end();
+
   DynamicJsonDocument doc(2048);
   DeserializationError error = deserializeJson(doc, payload);
   
   if (error) {
-    Serial.print("JSON parsing failed: ");
-    Serial.println(error.c_str());
-    http.end();
+    Serial.printf("JSON parsing failed: %s\n", error.c_str());
+    return false;
+  }
+
+  if (!doc.containsKey("main") || !doc.containsKey("weather") || !doc.containsKey("wind")) {
+    Serial.println("Missing required fields");
     return false;
   }
   
@@ -691,36 +703,36 @@ bool getWeatherData() {
   strlcpy(weather.iconCode, iconCode, sizeof(weather.iconCode));
   weather.wind_speed = doc["wind"]["speed"];
   
-  Serial.println("Temp: " + String(weather.temp) + "°C");
-  Serial.println("Feels: " + String(weather.feels_like) + "°C");
-  Serial.println("Wind: " + String(weather.wind_speed) + " m/s");
+  Serial.printf("API call 1: %lu ms\n", millis() - apiStart);
+  Serial.printf("Temp: %.1f°C, Feels: %.1f°C, Wind: %.1f m/s\n",
+                weather.temp, weather.feels_like, weather.wind_speed);
+
+  HTTPClient http2;
+  snprintf(url, sizeof(url),
+           "http://api.openweathermap.org/data/2.5/forecast?q=%s,%s&appid=%s&units=metric",
+           city, countryCode, apiKey);
   
-  http.end();
-  
-  String forecastUrl = "http://api.openweathermap.org/data/2.5/forecast?q=" + 
-                       String(city) + "," + String(countryCode) + 
-                       "&appid=" + String(apiKey) + "&units=metric";
+  apiStart = millis();
   
   Serial.println("Fetching forecast...");
-  http.begin(forecastUrl);
-  http.setTimeout(15000);  // 15 second timeout
-  httpCode = http.GET();
+  http2.begin(url);
+  http2.setTimeout(15000);  // 15 second timeout
+  httpCode = http2.GET();
   
   if (httpCode != 200) {
-    Serial.print("Forecast Error: ");
-    Serial.println(httpCode);
-    http.end();
+    Serial.printf("Forecast Error: %d\n", httpCode);
+    http2.end();
     return false;
   }
   
-  payload = http.getString();
+  payload = http2.getString();
+  http2.end();
+
   DynamicJsonDocument forecastDoc(16384);
   error = deserializeJson(forecastDoc, payload);
   
   if (error) {
-    Serial.print("Forecast JSON failed: ");
-    Serial.println(error.c_str());
-    http.end();
+    Serial.printf("Forecast JSON failed: %s\n", error.c_str());
     return false;
   }
   
@@ -729,9 +741,6 @@ bool getWeatherData() {
   
   weather.highTemp = weather.temp;
   weather.lowTemp = weather.temp;
-  
-  Serial.println("Calculating high/low from forecast...");
-  Serial.println("Starting with current: " + String(weather.temp) + "°C");
   
   JsonArray forecastList = forecastDoc["list"].as<JsonArray>();
   int count = 0;
@@ -760,10 +769,9 @@ bool getWeatherData() {
     }
   }
   
-  Serial.println("Final High: " + String(weather.highTemp) + "°C (from " + String(count) + " entries)");
-  Serial.println("Final Low: " + String(weather.lowTemp) + "°C");
-  
-  http.end();
+  Serial.printf("API call 2: %lu ms\n", millis() - apiStart);
+  Serial.printf("Precip: %d%%, High: %.1f°C, Low: %.1f°C\n",
+                weather.precipProb, weather.highTemp, weather.lowTemp);
   return true;
 }
 
