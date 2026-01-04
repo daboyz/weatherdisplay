@@ -15,7 +15,7 @@ const char* ssid = "XXXXXXXX";
 const char* password = "XXXXXXXX";
 
 // OpenWeatherMap API
-const char* apiKey = "XXXXXXXXXXXXXXXXXXXXXXX";
+const char* apiKey = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX";
 const char* city = "XXXX";
 const char* countryCode = "XX";
 
@@ -38,6 +38,7 @@ RTC_DATA_ATTR int prevWindSpeed = -999;
 RTC_DATA_ATTR int prevHighTemp = -999;
 RTC_DATA_ATTR int prevLowTemp = -999;
 RTC_DATA_ATTR int dinoPosition = 0;
+RTC_DATA_ATTR int failureCount = 0;
 
 // Wind icon bitmap (24x24px) - simplified wind symbol
 const unsigned char icon_wind[] PROGMEM = {
@@ -484,6 +485,7 @@ void setup() {
   delay(1000);
   
   Serial.println("Weather Display Starting...");
+  Serial.println("Failure count: " + String(failureCount));
   
   btStop();
   Serial.println("Bluetooth disabled");
@@ -495,9 +497,11 @@ void setup() {
   display.setRotation(1);
   display.setTextColor(GxEPD_BLACK);
   
-  connectWiFi();
+  //connectWiFi();
+  bool wifiConnected = connectWiFiWithRetries();
   
-  if (getWeatherData()) {
+  if (wifiConnected && getWeatherData()) {
+  //if (getWeatherData()) {
     int currentTemp = (int)round(weather.temp);
     int currentFeelsLike = (int)round(weather.feels_like);
     int currentWindSpeed = (int)round(weather.wind_speed * 3.6);
@@ -526,22 +530,77 @@ void setup() {
     } else {
       Serial.println("Weather unchanged - skipping display update");
     }
+
+    // Success - reset failure counter and sleep normal duration
+    failureCount = 0;
+    Serial.println("Success! Sleeping for 30 minutes...");
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000ULL);
+    esp_deep_sleep_start();
+
   } else {
+    // Failure - increment counter and implement smart retry
+    failureCount++;
     displayError();
+
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    
+    // Smart sleep duration based on failure count
+    uint64_t sleepMinutes;
+    if (failureCount == 1) {
+      sleepMinutes = 5;  // First failure: retry in 5 minutes
+      Serial.println("First failure - retrying in 5 minutes...");
+    } else if (failureCount == 2) {
+      sleepMinutes = 10;  // Second failure: retry in 10 minutes
+      Serial.println("Second failure - retrying in 10 minutes...");
+    } else {
+      sleepMinutes = 30;  // Third+ failure: retry in 30 minutes
+      Serial.println("Multiple failures - retrying in 30 minutes...");
+    }
+    
+    Serial.println("Going to sleep for 30 minutes...");
+    esp_sleep_enable_timer_wakeup(sleepMinutes * 60 * 1000000ULL);
+    esp_deep_sleep_start();
   }
   
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
+  //WiFi.disconnect(true);
+  //WiFi.mode(WIFI_OFF);
   
-  Serial.println("Going to sleep for 30 minutes...");
-  esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000ULL);
-  esp_deep_sleep_start();
+  //Serial.println("Going to sleep for 30 minutes...");
+  //esp_sleep_enable_timer_wakeup(SLEEP_DURATION * 1000000ULL);
+  //esp_deep_sleep_start();
 }
 
 void loop() {
 }
 
-void connectWiFi() {
+bool connectWiFiWithRetries() {
+  // Try connection 3 times with increasing timeouts
+  int retryAttempts[] = {20, 40, 60};  // 20s, 40s, 60s
+  
+  for (int i = 0; i < 3; i++) {
+    Serial.println("Connection attempt " + String(i + 1) + " of 3 (timeout: " + String(retryAttempts[i]) + "s)");
+    
+    if (connectWiFi(retryAttempts[i])) {
+      return true;
+    }
+    
+    // Wait a bit before retrying (except on last attempt)
+    if (i < 2) {
+      Serial.println("Waiting 2 seconds before retry...");
+      delay(2000);
+      WiFi.disconnect();
+      delay(1000);
+    }
+  }
+  
+  Serial.println("All connection attempts failed");
+  return false;
+}
+
+void connectWiFiOld() {    //TODO remove
   Serial.print("Connecting to WiFi");
   WiFi.setSleep(true);
   WiFi.begin(ssid, password);
@@ -561,6 +620,34 @@ void connectWiFi() {
   }
 }
 
+bool connectWiFi(int maxAttempts) {
+  Serial.print("Connecting to WiFi");
+  
+  // Optimize WiFi settings for connection
+  WiFi.persistent(false);  // Don't wear out flash
+  WiFi.setAutoReconnect(true);  // Help during connection attempts
+  WiFi.mode(WIFI_STA);
+  
+  WiFi.begin(ssid, password);
+  
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < maxAttempts) {
+    delay(1000);  // 1 second between checks - more stable after deep sleep
+    Serial.print(".");
+    attempts++;
+  }
+  
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nConnected!");
+    Serial.println("IP: " + WiFi.localIP().toString());
+    Serial.println("RSSI: " + String(WiFi.RSSI()) + " dBm");
+    return true;
+  } else {
+    Serial.println("\nFailed to connect (timeout)");
+    return false;
+  }
+}
+
 bool getWeatherData() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("WiFi not connected");
@@ -575,6 +662,7 @@ bool getWeatherData() {
   
   Serial.println("Fetching current weather...");
   http.begin(url);
+  http.setTimeout(15000);  // 15 second timeout
   int httpCode = http.GET();
   
   if (httpCode != 200) {
@@ -615,6 +703,7 @@ bool getWeatherData() {
   
   Serial.println("Fetching forecast...");
   http.begin(forecastUrl);
+  http.setTimeout(15000);  // 15 second timeout
   httpCode = http.GET();
   
   if (httpCode != 200) {
